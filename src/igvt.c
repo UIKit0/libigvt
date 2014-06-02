@@ -156,6 +156,49 @@ static const char *port_strings[] = {
     "PORT_E",
 };
 
+static void _filter_edid(unsigned char *edid, size_t edid_size)
+{
+    int i;
+
+    /*
+     * There are limits to the pixelClock EDID field
+     * that the Windows GT driver will support. 
+     *
+     * The limits are meaningless, since the port is
+     * virtual, and no clocks are actually configured.
+     *
+     * Override the pixelClock fields here to fit into
+     * the limits.
+     */
+
+    /*
+     * There are four timing descriptors. 18 bytes long,
+     * starting at byte 54. The first two bytes is the
+     * pixelClock.
+     */
+    for (i = 0; i < 4; i++) {
+        unsigned char *timingDescriptor = (unsigned char *) &edid[54 + (18 * i)];
+        unsigned short clock = timingDescriptor[0] + (timingDescriptor[1] << 8);
+
+        /* Cap the pixel clock (bytes 0-1) at 160mhz */
+        if (clock > 16000) {
+
+            /* Add the old value back to the checksum */
+            edid[0x7f] += timingDescriptor[0];
+            edid[0x7f] += timingDescriptor[1];
+
+            timingDescriptor[0] = 16000 & 0xff;
+            timingDescriptor[1] = 16000 >> 8;
+
+            /* Subtract the new value from the checksum */
+            edid[0x7f] -= timingDescriptor[0];
+            edid[0x7f] -= timingDescriptor[1];
+        }
+    }
+
+
+}
+
 int igvt_plug_display(unsigned int domid, gt_port vgt_port, unsigned char *edid, size_t edid_size, gt_port pgt_port)
 {
     char filename[256];
@@ -174,6 +217,8 @@ int igvt_plug_display(unsigned int domid, gt_port vgt_port, unsigned char *edid,
 
     fprintf(f, "%s\n", port_strings[pgt_port]);
     fclose (f);
+
+    _filter_edid(edid, edid_size);
 
     sprintf(filename, VGT_VM_ATTRIBUTE_FORMAT, domid, (char)((char)vgt_port + 'A'), "edid");
     f = fopen(filename, "w");
