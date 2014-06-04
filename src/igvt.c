@@ -281,13 +281,6 @@ int igvt_unplug_display(unsigned int domid, gt_port vgt_port)
     return (0);
 }
 
-/**
- * @brief Port connection predicate
- *
- * @param domid The domain ID of the port to check
- * @param vgt_port The port ID of the port to check
- * @return boolean; 0 = disconnected, 1 = connected
- */
 int igvt_port_plugged_p(unsigned int domid, gt_port vgt_port)
 {
     char path[256];
@@ -326,4 +319,13 @@ int igvt_port_plugged_p(unsigned int domid, gt_port vgt_port)
         fclose(f);
 
     return retval;
+}
+
+int igvt_port_hotpluggable(unsigned int vmid, gt_port vgt_port)
+{
+   if (vgt_port != 0) {
+       return 1;
+   }
+
+   return 0;
 }
