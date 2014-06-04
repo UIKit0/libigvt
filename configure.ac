@@ -6,7 +6,7 @@ AC_INIT([libigvt], [1.0], [john.baboval@citrix.com])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 LT_INIT
 AC_PROG_CC
-AC_CONFIG_SRCDIR([src/igvt.h])
+AC_CONFIG_SRCDIR([src/igvt.c])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR([m4])
 

@@ -1,0 +1,14 @@
+Source: libigvt
+Maintainer: John Baboval <john.baboval@citrix.com>
+Section: misc
+Priority: optional
+Build-Depends: debhelper
+
+Package: libigvt
+Architecture: amd64
+Depends: ${shlibs:Debends}, ${misc:Depends}
+Description: C bindings for the Intel Graphics Virtualization Technology sysfs API
+
+Package: libigvt-dev
+Architecture: amd64
+Description: Headers for libigvt
