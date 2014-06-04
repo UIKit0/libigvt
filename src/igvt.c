@@ -41,14 +41,16 @@ int igvt_set_foreground_vm(unsigned int domid)
         return -EINVAL;
     }
 
-    fd = fopen("/sys/kernel/vgt/control/foreground_vm", "w");
+    fd = fopen(VGT_KERNEL_PATH "/control/foreground_vm", "w");
     if (!fd)
         return retval;
 
     fprintf(fd, "%d\n", domid);
 
+    fclose(fd);
+
     // check that it was ready
-    fd = fopen("/sys/kernel/vgt/control/foreground_vm", "r");
+    fd = fopen(VGT_KERNEL_PATH "/control/foreground_vm", "r");
     if (!fd)
         return retval;
 
@@ -58,8 +60,7 @@ int igvt_set_foreground_vm(unsigned int domid)
         retval = -EAGAIN;
     }
 
-    if (fd)
-        fclose(fd);
+    fclose(fd);
 
     return retval;
 }
@@ -114,38 +115,38 @@ int igvt_create_instance(unsigned int domid, unsigned int aperture_size, unsigne
 {
     FILE *fd;
     char *path = VGT_KERNEL_PATH "/control/create_vgt_instance";
+    int retval = 0;
 
     fd = fopen(path, "w");
     if (!fd)
-        return errno;
+        return -ENODEV;
 
     if (fprintf(fd, "%d,%u,%u,%u,%d\n", domid, aperture_size, gm_size, fence_count, -1) < 0) {
-        fclose(fd);
-        return errno;
+        retval = -errno;
     }
 
     fclose(fd);
 
-    return 0;
+    return retval;
 }
 
 int igvt_destroy_instance(unsigned int domid)
 {
     FILE *fd;
     char *path = VGT_KERNEL_PATH "/control/create_vgt_instance";
+    int retval = 0;
 
     fd = fopen(path, "w");
     if (!fd)
-        return errno;
+        return -ENODEV;
 
     if (fprintf(fd, "%d\n", -domid) < 0) {
-        fclose(fd);
-        return errno;
+        retval = -errno;
     }
 
     fclose(fd);
 
-    return 0;
+    return retval;
 }
 
 static const char *port_strings[] = {
@@ -212,7 +213,7 @@ int igvt_plug_display(unsigned int domid, gt_port vgt_port, unsigned char *edid,
     f = fopen(filename, "w");
     if (!f) {
         //clog << logCrit << "error opening " << filename << endl;
-        return errno;
+        return -ENODEV;
     }
 
     fprintf(f, "%s\n", port_strings[pgt_port]);
@@ -224,7 +225,7 @@ int igvt_plug_display(unsigned int domid, gt_port vgt_port, unsigned char *edid,
     f = fopen(filename, "w");
     if (!f) {
         //clog << logCrit << "error opening " << filename << endl;
-        return errno;
+        return -ENODEV;
     }
 
     fwrite(edid, edid_size > 128 ? 128 : edid_size, 1, f);
@@ -234,7 +235,7 @@ int igvt_plug_display(unsigned int domid, gt_port vgt_port, unsigned char *edid,
     f = fopen(filename, "w");
     if (!f) {
         //clog << logCrit << "error opening " << filename << endl;
-        return errno;
+        return -ENODEV;
     }
 
     fprintf(f, "%s\n", "connect");
@@ -271,7 +272,7 @@ int igvt_unplug_display(unsigned int domid, gt_port vgt_port)
     f = fopen(path, "w");
     if (!f) {
         //clog << logCrit << "error opening " << filename << endl;
-        return errno;
+        return -ENODEV;
     }
 
     fprintf(f, "%s\n", "disconnect");
@@ -307,7 +308,7 @@ int igvt_port_plugged_p(unsigned int domid, gt_port vgt_port)
     }
 
     sprintf(path, VGT_VM_ATTRIBUTE_FORMAT, domid, (char)((char)vgt_port + 'A'), "connection");
-    f = fopen(path, "w");
+    f = fopen(path, "r");
     if (!f) {
         //clog << logCrit << "error opening " << filename << endl;
         return (0);
