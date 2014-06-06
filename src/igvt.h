@@ -110,6 +110,6 @@ int igvt_port_plugged_p(unsigned int vmid, gt_port vgt_port);
  *
  * @param domid The domain of the port to check
  * @param vgt_port The port ID of the port to check
- * @return bookean; 0 = not hotpluggable, 1 = hotpluggable
+ * @return boolean; 0 = not hotpluggable, 1 = hotpluggable
  */
 int igvt_port_hotpluggable(unsigned int vmid, gt_port vgt_port);
