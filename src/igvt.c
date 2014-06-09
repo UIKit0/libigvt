@@ -25,7 +25,7 @@
 #include "igvt.h"
 
 #define VGT_KERNEL_PATH "/sys/kernel/vgt"
-#define VGT_VM_ATTRIBUTE_FORMAT VGT_KERNEL_PATH "/vm%d/PORT_%c/%s"
+#define VGT_VM_ATTRIBUTE_FORMAT VGT_KERNEL_PATH "/vm%d/%s/%s"
 
 int igvt_set_foreground_vm(unsigned int domid)
 {
@@ -67,7 +67,7 @@ int igvt_set_foreground_vm(unsigned int domid)
 
 gt_port igvt_translate_i915_port(const char *i915_port_name)
 {
-    int port = 2;
+    gt_port port = GVT_MAX_PORTS;
 
     // Ugliness - logic from intel's vgt_mgr script
     if (strcmp(i915_port_name, "card0-eDP-1") == 0) {
@@ -121,7 +121,7 @@ int igvt_create_instance(unsigned int domid, unsigned int aperture_size, unsigne
     if (!fd)
         return -ENODEV;
 
-    if (fprintf(fd, "%d,%u,%u,%u,%d\n", domid, aperture_size, gm_size, fence_count, -1) < 0) {
+    if (fprintf(fd, "%d,%u,%u,%u,%d\n", domid, aperture_size, gm_size, fence_count, 1) < 0) {
         retval = -errno;
     }
 
@@ -209,7 +209,7 @@ int igvt_plug_display(unsigned int domid, gt_port vgt_port, unsigned char *edid,
         igvt_unplug_display(domid, vgt_port);
     }
 
-    sprintf(filename, VGT_VM_ATTRIBUTE_FORMAT, domid, (char)((char)vgt_port + 'A'), "port_override");
+    sprintf(filename, VGT_VM_ATTRIBUTE_FORMAT, domid, port_strings[vgt_port], "port_override");
     f = fopen(filename, "w");
     if (!f) {
         //clog << logCrit << "error opening " << filename << endl;
@@ -221,17 +221,20 @@ int igvt_plug_display(unsigned int domid, gt_port vgt_port, unsigned char *edid,
 
     _filter_edid(edid, edid_size);
 
-    sprintf(filename, VGT_VM_ATTRIBUTE_FORMAT, domid, (char)((char)vgt_port + 'A'), "edid");
+    sprintf(filename, VGT_VM_ATTRIBUTE_FORMAT, domid, port_strings[vgt_port], "edid");
     f = fopen(filename, "w");
     if (!f) {
         //clog << logCrit << "error opening " << filename << endl;
         return -ENODEV;
     }
 
-    fwrite(edid, edid_size > 128 ? 128 : edid_size, 1, f);
+    if (fwrite(edid, 1, edid_size, f) != edid_size) {
+        fprintf(stderr, "I-GVT: %s failed to write EDID, errno = %d\n",
+                __func__, errno);
+    }
     fclose (f);
 
-    sprintf(filename, VGT_VM_ATTRIBUTE_FORMAT, domid, (char)((char)vgt_port + 'A'), "connection");
+    sprintf(filename, VGT_VM_ATTRIBUTE_FORMAT, domid, port_strings[vgt_port], "connection");
     f = fopen(filename, "w");
     if (!f) {
         //clog << logCrit << "error opening " << filename << endl;
@@ -268,7 +271,7 @@ int igvt_unplug_display(unsigned int domid, gt_port vgt_port)
         return (-EINVAL);
     }
 
-    sprintf(path, VGT_VM_ATTRIBUTE_FORMAT, domid, (char)((char)vgt_port + 'A'), "connection");
+    sprintf(path, VGT_VM_ATTRIBUTE_FORMAT, domid, port_strings[vgt_port], "connection");
     f = fopen(path, "w");
     if (!f) {
         //clog << logCrit << "error opening " << filename << endl;
@@ -300,7 +303,7 @@ int igvt_port_plugged_p(unsigned int domid, gt_port vgt_port)
         return (0);
     }
 
-    sprintf(path, VGT_VM_ATTRIBUTE_FORMAT, domid, (char)((char)vgt_port + 'A'), "connection");
+    sprintf(path, VGT_VM_ATTRIBUTE_FORMAT, domid, port_strings[vgt_port], "connection");
     f = fopen(path, "r");
     if (!f) {
         //clog << logCrit << "error opening " << filename << endl;
