@@ -9,6 +9,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * Lesser General Public License for more details.
  */
+#ifndef __IGVT_H_
+#define __IGVT_H_
 
 /**
  * @file igvt.h
@@ -22,10 +24,12 @@
 
 typedef enum {
     PORT_A = 0,
+    PORT_EDP = PORT_A,
     PORT_B,
     PORT_C,
     PORT_D,
     PORT_E,
+    PORT_VGA = PORT_E,
     GVT_MAX_PORTS,
 } gt_port;
 
@@ -113,3 +117,5 @@ int igvt_port_plugged_p(unsigned int vmid, gt_port vgt_port);
  * @return boolean; 0 = not hotpluggable, 1 = hotpluggable
  */
 int igvt_port_hotpluggable(unsigned int vmid, gt_port vgt_port);
+
+#endif
