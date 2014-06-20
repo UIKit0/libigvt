@@ -228,6 +228,11 @@ int igvt_plug_display(unsigned int domid, gt_port vgt_port, unsigned char *edid,
         return -ENODEV;
     }
 
+    /* Writing more than 128 EDID bytes currently hangs the system */
+    if (edid_size > 128) {
+        edid_size = 128;
+    }
+
     if (fwrite(edid, 1, edid_size, f) != edid_size) {
         fprintf(stderr, "I-GVT: %s failed to write EDID, errno = %d\n",
                 __func__, errno);
