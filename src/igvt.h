@@ -12,6 +12,10 @@
 #ifndef __IGVT_H_
 #define __IGVT_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * @file igvt.h
  *
@@ -23,14 +27,13 @@
  */
 
 typedef enum {
-    PORT_A = 0,
-    PORT_EDP = PORT_A,
-    PORT_B,
-    PORT_C,
-    PORT_D,
-    PORT_E,
-    PORT_VGA = PORT_E,
+    PORT_A = 0, PORT_EDP = PORT_A,
+    PORT_B = 1,
+    PORT_C = 2,
+    PORT_D = 3,
+    PORT_E = 4, PORT_VGA = PORT_E,
     GVT_MAX_PORTS,
+    PORT_ILLEGAL = GVT_MAX_PORTS
 } gt_port;
 
 /**
@@ -48,7 +51,7 @@ int igvt_set_foreground_vm(unsigned int domid);
  *        found in /sys/class/drm/i915
  * @return gt_port enum, or MAX_PORTS on error
  */
-gt_port igvt_translate_i915_port(const char *i915_port_name);
+gt_port igvt_translate_i915_port(unsigned int domid, const char *i915_port_name);
 
 /**
  * @brief translates from a gt_port enum to an i915 DRM port name.
@@ -117,5 +120,18 @@ int igvt_port_plugged_p(unsigned int vmid, gt_port vgt_port);
  * @return boolean; 0 = not hotpluggable, 1 = hotpluggable
  */
 int igvt_port_hotpluggable(unsigned int vmid, gt_port vgt_port);
+
+/**
+ * @brief Set error/warning loggers
+ *
+ * @param logger function to be called to log errors
+ * @return previous logger function
+ */
+int (*igvt_set_warning_logger(int (*logger)(const char *text)))(const char *);
+int (*igvt_set_error_logger  (int (*logger)(const char *text)))(const char *);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

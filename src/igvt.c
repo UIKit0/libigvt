@@ -17,6 +17,8 @@
  *
  */
 
+#include <unistd.h>
+#include <stdarg.h>
 #include <sys/stat.h>
 #include <stdio.h>
 #include <errno.h>
@@ -24,39 +26,139 @@
 
 #include "igvt.h"
 
+typedef enum {
+    IGVT_ERROR = 0,
+    IGVT_WARNING = 1,
+    IGVT_NUM_LOGGERS
+} igvt_log_type;
+
+static int igvt_printf(igvt_log_type log_type, const char *format, ...);
+
 #define VGT_KERNEL_PATH "/sys/kernel/vgt"
 #define VGT_VM_ATTRIBUTE_FORMAT VGT_KERNEL_PATH "/vm%d/%s/%s"
 
+static const char *port_strings[] = {
+    "PORT_A",
+    "PORT_B",
+    "PORT_C",
+    "PORT_D",
+    "PORT_E",
+};
+
+static inline int
+igvt_is_valid_port_p(gt_port port)
+{
+    switch (port) {
+        case PORT_EDP:
+        case PORT_B:
+        case PORT_C:
+        case PORT_D:
+        case PORT_VGA:
+            return 1;
+        break;
+
+        default:
+            return 0;
+        break;
+    }
+
+    return 0;
+}
+
+
+/**
+ * @brief Set the foreground VM
+ *
+ * @param domid The domain ID of the port to put in the foreground
+ * @return 0 on success
+ */
 int igvt_set_foreground_vm(unsigned int domid)
 {
     FILE *fd;
     char path[128];
     struct stat st;
-    int retval = -ENODEV;
-    int r;
+    int retval = 0;
+    int n, r = -1;
+    int status;
 
-    snprintf(path, 128, VGT_KERNEL_PATH "/vm%d", domid);
+    if (domid != 0) {
+        snprintf(path, sizeof(path), VGT_KERNEL_PATH "/vm%d", domid);
 
-    if (domid != 0 && stat(path, &st) != 0) {
-        return -EINVAL;
+        if (stat(path, &st) != 0) {
+	    igvt_printf(IGVT_WARNING, "%s::VM %d at %s doesn't exist\n",
+			__func__, domid, path);
+
+            return -EINVAL;
+        }
     }
 
-    fd = fopen(VGT_KERNEL_PATH "/control/foreground_vm", "w");
-    if (!fd)
-        return retval;
+    /* Check to see if the fg vm needs to change */
+    fd = fopen(VGT_KERNEL_PATH "/control/foreground_vm", "r");
 
-    fprintf(fd, "%d\n", domid);
+    if (!fd) {
+	igvt_printf(IGVT_WARNING, "::%s Foreground VM file " 
+		    VGT_KERNEL_PATH
+		    "/control/foreground_vm can't be open for read\n",
+		    __func__);
+
+        return -ENODEV;
+    }
+
+    n = fscanf(fd, "%d", &r);
 
     fclose(fd);
 
-    // check that it was ready
-    fd = fopen(VGT_KERNEL_PATH "/control/foreground_vm", "r");
-    if (!fd)
-        return retval;
+    if (n == 1 && r == domid) {
+	/* No change required. */
+        return 0;
+    }
 
-    r = -1;
-    if ((fscanf(fd, "%d", &r) != 1) ||
-        r != domid) {
+    /* We need to change the fg vm. */
+    fd = fopen(VGT_KERNEL_PATH "/control/foreground_vm", "w");
+
+    if (!fd) {
+	igvt_printf(IGVT_WARNING, "::%s Foreground VM file "
+		    VGT_KERNEL_PATH
+		    "/control/foreground_vm can't be open for write\n",
+		    __func__);
+
+        return -ENODEV;
+    }
+
+    status = fprintf(fd, "%d", domid);
+
+    if (status <= 0) {
+	igvt_printf(IGVT_WARNING, "%s::fprintf returned %d, error: %s\n",
+		    __func__, status, strerror(errno));
+    }
+
+    status = fclose(fd);
+
+    if (status < 0) {
+	igvt_printf(IGVT_WARNING, "%s::fclose returned %d, error: %s\n",
+		    __func__, status, strerror(errno));
+    }
+
+    /* check that it was actually set. */
+    fd = fopen(VGT_KERNEL_PATH "/control/foreground_vm", "r");
+
+    if (!fd) {
+	igvt_printf(IGVT_WARNING, "%s::Foreground VM file "
+		    VGT_KERNEL_PATH 
+		    "/control/foreground_vm can't be open for re-read\n",
+		    __func__);
+
+        return -ENODEV;
+    }
+
+    n = fscanf(fd, "%d", &r);
+
+    if (n != 1 || r != domid) {
+        igvt_printf(IGVT_WARNING,
+		    "%s:: set DomID %d does not match "
+		    "returned DomID: %d nRead: %d\n",
+	             __func__, domid, r, n);
+
         retval = -EAGAIN;
     }
 
@@ -65,63 +167,96 @@ int igvt_set_foreground_vm(unsigned int domid)
     return retval;
 }
 
-gt_port igvt_translate_i915_port(const char *i915_port_name)
+/**
+ * @brief Given a port name return the associated gt_port ID
+ *
+ * @param domid The domain ID
+ * @param i915_port_name
+ * @return the gt_port on success or PORT_ILLEGAL on failure
+ * Note that the same port ID is returned for DP and HDMI-A
+ * devices.
+ */
+gt_port igvt_translate_i915_port(unsigned int domid, const char *i915_port_name)
 {
-    gt_port port = GVT_MAX_PORTS;
+    gt_port port = PORT_ILLEGAL;
 
-    // Ugliness - logic from intel's vgt_mgr script
+    /* Ugliness - logic from intel's vgt_mgr script */
     if (strcmp(i915_port_name, "card0-eDP-1") == 0) {
-        port = 0;
+        port = PORT_EDP;
     } else if (strcmp(i915_port_name, "card0-DP-1") == 0) {
-        port = 1;
+        port = PORT_B;
     } else if (strcmp(i915_port_name, "card0-HDMI-A-1") == 0) {
-        port = 1;
+        port = PORT_B;
     } else if (strcmp(i915_port_name, "card0-DP-2") == 0) {
-        port = 2;
+        port = PORT_C;
     } else if (strcmp(i915_port_name, "card0-HDMI-A-2") == 0) {
-        port = 2;
+        port = PORT_C;
     } else if (strcmp(i915_port_name, "card0-DP-3") == 0) {
-        port = 3;
+        port = PORT_D;
     } else if (strcmp(i915_port_name, "card0-HDMI-A-3") == 0) {
-        port = 3;
+        port = PORT_D;
     } else if (strcmp(i915_port_name, "card0-VGA-1") == 0) {
-        port = 4;
+        port = PORT_VGA;
+    } else {
+	igvt_printf(IGVT_ERROR, "%s::Invalid vgt_port %s\n",
+		    __func__, i915_port_name);
     }
 
     return port;
 }
 
+/**
+ * @brief Given a gt_port ID return the associated port name
+ *
+ * @param pgt_port_num
+ * @return the port name on success, or "INVALID" on failure.
+ * Note that only the HDMI-A name is returned for ports that
+ * might actually be DP ports.
+ */
 const char *igvt_translate_pgt_port(gt_port pgt_port_num)
 {
     switch (pgt_port_num) {
-    case 0:
+    case PORT_EDP:
         return "card0-eDP-1";
-    case 1:
+    case PORT_B:
         return "card-HDMI-A-1";
-    case 2:
+    case PORT_C:
         return "card0-HDMI-A-2";
-    case 3:
+    case PORT_D:
         return "card0-HDMI-A-3";
-    case 4:
+    case PORT_VGA:
         return "card0-VGA-1";
     default:
+        /* Should there be an error here? */
         break;
     }
 
     return "INVALID";
 }
 
-int igvt_create_instance(unsigned int domid, unsigned int aperture_size, unsigned int gm_size, unsigned int fence_count)
+/**
+ * @brief Create an igvt instance
+ *
+ * @param domid The domain ID
+ * @param aperture_size
+ * @param gm_size
+ * @param fence_count
+ * @return 0 on success
+ */
+int igvt_create_instance(unsigned int domid, unsigned int aperture_size,
+			 unsigned int gm_size, unsigned int fence_count)
 {
     FILE *fd;
     char *path = VGT_KERNEL_PATH "/control/create_vgt_instance";
     int retval = 0;
 
     fd = fopen(path, "w");
+
     if (!fd)
         return -ENODEV;
 
-    if (fprintf(fd, "%d,%u,%u,%u,%d\n", domid, aperture_size, gm_size, fence_count, 1) < 0) {
+    if (fprintf(fd, "%d,%u,%u,%u,%d\n", domid, aperture_size,
+				        gm_size, fence_count, 1) < 0) {
         retval = -errno;
     }
 
@@ -130,6 +265,12 @@ int igvt_create_instance(unsigned int domid, unsigned int aperture_size, unsigne
     return retval;
 }
 
+/**
+ * @brief Destroy an igvt instance
+ *
+ * @param domid The domain ID
+ * @return 0 on success
+ */
 int igvt_destroy_instance(unsigned int domid)
 {
     FILE *fd;
@@ -137,6 +278,7 @@ int igvt_destroy_instance(unsigned int domid)
     int retval = 0;
 
     fd = fopen(path, "w");
+
     if (!fd)
         return -ENODEV;
 
@@ -148,14 +290,6 @@ int igvt_destroy_instance(unsigned int domid)
 
     return retval;
 }
-
-static const char *port_strings[] = {
-    "PORT_A",
-    "PORT_B",
-    "PORT_C",
-    "PORT_D",
-    "PORT_E",
-};
 
 static void _filter_edid(unsigned char *edid, size_t edid_size)
 {
@@ -200,31 +334,69 @@ static void _filter_edid(unsigned char *edid, size_t edid_size)
 
 }
 
-int igvt_plug_display(unsigned int domid, gt_port vgt_port, unsigned char *edid, size_t edid_size, gt_port pgt_port)
+/**
+ * @brief Plug in a display
+ *
+ * @param domid The domain ID
+ * @param vgt_port
+ * @param edid
+ * @param edid_size
+ * @param pgt_port
+ * @return 0 on success
+ */
+int igvt_plug_display(unsigned int domid, gt_port vgt_port,
+		      unsigned char *edid, size_t edid_size,
+		      gt_port pgt_port)
 {
     char filename[256];
-    FILE *f;
+    FILE *fd;
+
+    if (!igvt_is_valid_port_p(vgt_port)) {
+	igvt_printf(IGVT_ERROR, "%s::Invalid vgt_port %s\n",
+		    __func__, vgt_port);
+
+        return -EINVAL;
+    }
+
+    if (!igvt_is_valid_port_p(pgt_port)) {
+	igvt_printf(IGVT_ERROR, "%s::Invalid pgt_port %s\n",
+		    __func__, pgt_port);
+
+        return -EINVAL;
+    }
 
     if (igvt_port_plugged_p(domid, vgt_port)) {
         igvt_unplug_display(domid, vgt_port);
     }
 
-    sprintf(filename, VGT_VM_ATTRIBUTE_FORMAT, domid, port_strings[vgt_port], "port_override");
-    f = fopen(filename, "w");
-    if (!f) {
-        //clog << logCrit << "error opening " << filename << endl;
+    snprintf(filename, sizeof(filename),
+	     VGT_VM_ATTRIBUTE_FORMAT, domid,
+	     port_strings[vgt_port], "port_override");
+
+    fd = fopen(filename, "w");
+
+    if (!fd) {
+	igvt_printf(IGVT_ERROR, "%s::error opening %s\n",
+		    __func__, filename);
+
         return -ENODEV;
     }
 
-    fprintf(f, "%s\n", port_strings[pgt_port]);
-    fclose (f);
+    fprintf(fd, "%s\n", port_strings[pgt_port]);
+    fclose (fd);
 
     _filter_edid(edid, edid_size);
 
-    sprintf(filename, VGT_VM_ATTRIBUTE_FORMAT, domid, port_strings[vgt_port], "edid");
-    f = fopen(filename, "w");
-    if (!f) {
-        //clog << logCrit << "error opening " << filename << endl;
+    snprintf(filename, sizeof(filename),
+	     VGT_VM_ATTRIBUTE_FORMAT, domid,
+	     port_strings[vgt_port], "edid");
+
+    fd = fopen(filename, "w");
+
+    if (!fd) {
+	igvt_printf(IGVT_ERROR, "%s::error opening %s\n",
+		    __func__, filename);
+
         return -ENODEV;
     }
 
@@ -233,21 +405,28 @@ int igvt_plug_display(unsigned int domid, gt_port vgt_port, unsigned char *edid,
         edid_size = 128;
     }
 
-    if (fwrite(edid, 1, edid_size, f) != edid_size) {
-        fprintf(stderr, "I-GVT: %s failed to write EDID, errno = %d\n",
+    if (fwrite(edid, 1, edid_size, fd) != edid_size) {
+        fprintf(stderr, "%s::failed to write EDID, errno = %d\n",
                 __func__, errno);
     }
-    fclose (f);
 
-    sprintf(filename, VGT_VM_ATTRIBUTE_FORMAT, domid, port_strings[vgt_port], "connection");
-    f = fopen(filename, "w");
-    if (!f) {
-        //clog << logCrit << "error opening " << filename << endl;
+    fclose (fd);
+
+    snprintf(filename, sizeof(filename),
+	     VGT_VM_ATTRIBUTE_FORMAT, domid, 
+	     port_strings[vgt_port], "connection");
+
+    fd = fopen(filename, "w");
+
+    if (!fd) {
+	igvt_printf(IGVT_ERROR, "%s::error opening %s\n",
+		    __func__, filename);
+
         return -ENODEV;
     }
 
-    fprintf(f, "%s\n", "connect");
-    fclose (f);
+    fprintf(fd, "%s\n", "connect");
+    fclose (fd);
 
     return (0);
 }
@@ -265,21 +444,32 @@ int igvt_unplug_display(unsigned int domid, gt_port vgt_port)
     FILE *f;
     struct stat st;
 
-    snprintf(path, 128, VGT_KERNEL_PATH "/vm%d", domid);
+    if (!igvt_is_valid_port_p(vgt_port)) {
+	igvt_printf(IGVT_ERROR, "%s::Invalid vgt_port %s\n",
+		    __func__, vgt_port);
 
-    if (domid == 0 || stat(path, &st) != 0) {
-        //clog << debugXenGT << debugXenGTHotplug << "cowardly refusing to hotplug dom0" << endl;
         return -EINVAL;
     }
 
-    if (vgt_port >= GVT_MAX_PORTS) {
-        return (-EINVAL);
+    snprintf(path, sizeof(path), VGT_KERNEL_PATH "/vm%d", domid);
+
+    if (domid == 0 || stat(path, &st) != 0) {
+	igvt_printf(IGVT_ERROR, "%s::cowardly refusing to hotplug dom0",
+		    __func__);
+
+        return -EINVAL;
     }
 
-    sprintf(path, VGT_VM_ATTRIBUTE_FORMAT, domid, port_strings[vgt_port], "connection");
+    snprintf(path, sizeof(path),
+	     VGT_VM_ATTRIBUTE_FORMAT, domid, 
+	     port_strings[vgt_port], "connection");
+
     f = fopen(path, "w");
+
     if (!f) {
-        //clog << logCrit << "error opening " << filename << endl;
+	igvt_printf(IGVT_ERROR, "%s::error opening %s\n",
+		    __func__, path);
+
         return -ENODEV;
     }
 
@@ -289,6 +479,13 @@ int igvt_unplug_display(unsigned int domid, gt_port vgt_port)
     return (0);
 }
 
+/**
+ * @brief Predicate that returns whether a port is plugged in or not
+ *
+ * @param domid The domain ID
+ * @param vgt_port
+ * @return 1 if plugged in
+ */
 int igvt_port_plugged_p(unsigned int domid, gt_port vgt_port)
 {
     char path[256];
@@ -297,22 +494,40 @@ int igvt_port_plugged_p(unsigned int domid, gt_port vgt_port)
     struct stat st;
     int retval = 0;
 
-    snprintf(path, 128, VGT_KERNEL_PATH "/vm%d", domid);
+    if (!igvt_is_valid_port_p(vgt_port)) {
+	igvt_printf(IGVT_ERROR, "%s::Invalid vgt_port %s\n",
+		    __func__, vgt_port);
 
-    if (domid == 0 || stat(path, &st) != 0) {
-        //clog << debugXenGT << debugXenGTHotplug << "cowardly refusing to hotplug dom0" << endl;
         return (0);
     }
 
-    if (vgt_port >= GVT_MAX_PORTS) {
+    if (domid == 0) {
+	igvt_printf(IGVT_ERROR, "%s::cowardly refusing to hotplug dom0",
+		    __func__);
+
         return (0);
     }
 
-    sprintf(path, VGT_VM_ATTRIBUTE_FORMAT, domid, port_strings[vgt_port], "connection");
+    snprintf(path, sizeof(path), VGT_KERNEL_PATH "/vm%d", domid);
+
+    if (stat(path, &st) != 0) {
+	igvt_printf(IGVT_ERROR, "%s::error opening %s\n",
+		    __func__, path);
+
+        return (0);
+    }
+
+    snprintf(path, sizeof(path),
+	     VGT_VM_ATTRIBUTE_FORMAT, domid, 
+	     port_strings[vgt_port], "connection");
+
     f = fopen(path, "r");
+
     if (!f) {
-        //clog << logCrit << "error opening " << filename << endl;
-        return (0);
+	igvt_printf(IGVT_ERROR, "%s::error opening %s\n",
+		    __func__, path);
+
+        return 0;
     }
 
     if (fscanf(f, "%s", c) != 1) {
@@ -329,11 +544,86 @@ int igvt_port_plugged_p(unsigned int domid, gt_port vgt_port)
     return retval;
 }
 
+/**
+ * @brief Predicate that returns whether a port is hot-pluggable
+ *
+ * @param vmid The ID of the vm
+ * @param vgt_port
+ * @return 1 if plugged in
+ */
 int igvt_port_hotpluggable(unsigned int vmid, gt_port vgt_port)
 {
-   if (vgt_port != 0) {
-       return 1;
-   }
 
-   return 0;
+    switch (vgt_port) {
+
+    /* the EDP port is not hotpluggable */
+    case PORT_EDP:
+        return 0;
+    
+    /* All other legal ports are hotpluggable */
+    case PORT_B:
+    case PORT_C:
+    case PORT_D:
+    case PORT_VGA:
+        return 1;
+
+    /* Not a legal port... */
+    default:
+	igvt_printf(IGVT_ERROR, "%s::Invalid vgt_port %s\n",
+		    __func__, vgt_port);
+
+        return 0;
+    }
+
+    return 0;
+}
+
+static int (*loggers[IGVT_NUM_LOGGERS])(const char *text);
+
+/**
+ * @brief Set error/warning loggers
+ *
+ * @param logger function to be called to log errors
+ * @return previous logger function
+ */
+int (*igvt_set_warning_logger(int (*new_logger)(const char *text)))(const char *)
+{
+    int (*old_logger)(const char *text) = loggers[IGVT_WARNING];
+
+    loggers[IGVT_WARNING] = new_logger;
+
+    return old_logger;
+}
+
+int (*igvt_set_error_logger(int (*new_logger)(const char *text)))(const char *)
+{
+    int (*old_logger)(const char *text) = loggers[IGVT_ERROR];
+
+    loggers[IGVT_WARNING] = new_logger;
+
+    return old_logger;
+}
+
+static int
+igvt_printf(igvt_log_type log_type, const char *format, ...)
+{
+    va_list arg;
+    int done = 0;
+    int (*logger)(const char *text) = loggers[log_type];
+
+    if (logger) {
+        char buffer[256];
+
+        va_start (arg, format);
+        done = vsnprintf (buffer, sizeof(buffer), format, arg);
+        va_end (arg);
+
+	logger(buffer);
+    } else {
+        va_start (arg, format);
+        done = vfprintf(stdout, format, arg);
+        va_end (arg);
+    }
+
+    return done;
 }
