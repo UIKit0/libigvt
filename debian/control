@@ -6,7 +6,7 @@ Build-Depends: debhelper
 
 Package: libigvt
 Architecture: amd64
-Depends: ${shlibs:Debends}, ${misc:Depends}
+Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: C bindings for the Intel Graphics Virtualization Technology sysfs API
 
 Package: libigvt-dev

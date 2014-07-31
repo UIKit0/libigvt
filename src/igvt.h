@@ -51,7 +51,7 @@ int igvt_set_foreground_vm(unsigned int domid);
  *        found in /sys/class/drm/i915
  * @return gt_port enum, or MAX_PORTS on error
  */
-gt_port igvt_translate_i915_port(unsigned int domid, const char *i915_port_name);
+gt_port igvt_translate_i915_port(const char *i915_port_name);
 
 /**
  * @brief translates from a gt_port enum to an i915 DRM port name.
@@ -80,6 +80,14 @@ int igvt_create_instance(unsigned int domid, unsigned int aperture_size, unsigne
  * @return 0 on success
  */
 int igvt_destroy_instance(unsigned int domid);
+
+/**
+ * @brief igvt enabled predicate
+ *
+ * @param domid The domain ID of the port to check
+ * @return boolean; 0 = igvt not enabled, 1 = igvt enabled
+ */
+int igvt_enabled_p(unsigned int vmid);
 
 /**
  * @brief Plug a display into a virtual port
@@ -111,6 +119,14 @@ int igvt_unplug_display(unsigned int domid, gt_port vgt_port);
  * @return boolean; 0 = disconnected, 1 = connected
  */
 int igvt_port_plugged_p(unsigned int vmid, gt_port vgt_port);
+
+/**
+ * @brief Port present predicate
+ *
+ * @param vgt_port The port ID of the port to check
+ * @return boolean; 0 = not present, 1 = present
+ */
+int igvt_port_present_p(gt_port vgt_port);
 
 /**
  * @brief Port hotpluggable
