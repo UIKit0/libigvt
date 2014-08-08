@@ -65,6 +65,21 @@ igvt_is_valid_port_p(gt_port port)
     return 0;
 }
 
+int igvt_available_p(void)
+{
+    struct stat st;
+
+    /*
+     * If the top level path to the igvt info is missing
+     * then igvt isn't supported on this machine.
+     */
+    if (stat(VGT_KERNEL_PATH, &st) != 0) {
+        return 0;
+    }
+
+    return 1;
+}
+
 int igvt_enabled_p(unsigned int domid)
 {
     char path[128];

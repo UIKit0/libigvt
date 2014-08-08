@@ -82,6 +82,13 @@ int igvt_create_instance(unsigned int domid, unsigned int aperture_size, unsigne
 int igvt_destroy_instance(unsigned int domid);
 
 /**
+ * @brief igvt available predicate
+ *
+ * @return boolean; 0 = igvt not available, 1 = igvt available
+ */
+int igvt_available_p(void);
+
+/**
  * @brief igvt enabled predicate
  *
  * @param domid The domain ID of the port to check
