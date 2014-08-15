@@ -327,9 +327,56 @@ int igvt_destroy_instance(unsigned int domid)
     return retval;
 }
 
-static void _filter_edid(unsigned char *edid, size_t edid_size)
+static void write_edid_byte(unsigned char *edid, size_t byte, const unsigned char value)
+{
+	/* Add the old value back to the checksum */
+	edid[0x7f] += edid[byte];
+
+	edid[byte] = value;
+
+	/* Subtract the new value from the checksum */
+	edid[0x7f] -= edid[byte];
+}
+
+static void _filter_edid(unsigned char *edid, size_t edid_size, int analog_port)
 {
     int i;
+
+    /*
+     * The virtual port is unaware of the dongle status,
+     * so we must make certain that the digital/analog input
+     * bit matches the port.
+     *
+     * The digital/analog bit is in the Video Input Parameters
+     * bitmap. EDID byte 20, bit 7.
+     * 
+     * Toggling this bit changes the definition of the 
+     * Supported Features Bitmap (byte 24) bits 3:4. When digital,
+     * 0x0 == RGB 4:4:4 color support. When analog, 0x1 == RGB color.
+     */
+
+    if (analog_port && (edid[20] & 0x80) ) {
+
+        write_edid_byte(edid, 20, 0x80);
+        write_edid_byte(edid, 24, (edid[24] & 0xE7) | 0x08);
+
+    } else if (!analog_port && !(edid[20] & 0x80)) {
+
+        write_edid_byte(edid, 20, 0x00);
+        write_edid_byte(edid, 24, (edid[24] & 0xE7));
+
+    } 
+
+    /*
+     * Funny things happen when the Windows graphics driver
+     * invokes DPMS. (Stale images, off-screen buffers visible).
+     *
+     * Clear the DPMS bits so Windows doesn't use it.
+     * 
+     * DPMS support bits are in the Supported Features Bitmap.
+     * Byte 24, bits 5:7
+     */
+    write_edid_byte(edid, 24, edid[24] & 0x1F);
 
     /*
      * There are limits to the pixelClock EDID field
@@ -354,19 +401,15 @@ static void _filter_edid(unsigned char *edid, size_t edid_size)
         /* Cap the pixel clock (bytes 0-1) at 160mhz */
         if (clock > 16000) {
 
-            /* Add the old value back to the checksum */
-            edid[0x7f] += timingDescriptor[0];
-            edid[0x7f] += timingDescriptor[1];
-
-            timingDescriptor[0] = 16000 & 0xff;
-            timingDescriptor[1] = 16000 >> 8;
-
-            /* Subtract the new value from the checksum */
-            edid[0x7f] -= timingDescriptor[0];
-            edid[0x7f] -= timingDescriptor[1];
+            write_edid_byte(edid, (&timingDescriptor[0] - edid), 16000 & 0xff);
+            write_edid_byte(edid, (&timingDescriptor[1] - edid), 16000 >> 8);
         }
     }
+}
 
+static int is_port_digital(gt_port port) {
+
+    return port < PORT_E;
 
 }
 
@@ -427,7 +470,7 @@ int igvt_plug_display(unsigned int domid, gt_port vgt_port,
     fprintf(fd, "%s\n", port_strings[pgt_port]);
     fclose (fd);
 
-    _filter_edid(edid, edid_size);
+    _filter_edid(edid, edid_size, is_port_digital(vgt_port));
 
     snprintf(filename, sizeof(filename),
 	     VGT_VM_ATTRIBUTE_FORMAT, domid,
