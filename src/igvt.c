@@ -357,12 +357,12 @@ static void _filter_edid(unsigned char *edid, size_t edid_size, int analog_port)
 
     if (analog_port && (edid[20] & 0x80) ) {
 
-        write_edid_byte(edid, 20, 0x80);
+        write_edid_byte(edid, 20, 0x00);
         write_edid_byte(edid, 24, (edid[24] & 0xE7) | 0x08);
 
     } else if (!analog_port && !(edid[20] & 0x80)) {
 
-        write_edid_byte(edid, 20, 0x00);
+        write_edid_byte(edid, 20, 0x80);
         write_edid_byte(edid, 24, (edid[24] & 0xE7));
 
     } 
