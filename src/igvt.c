@@ -354,7 +354,6 @@ static void _filter_edid(unsigned char *edid, size_t edid_size, int analog_port)
      * Supported Features Bitmap (byte 24) bits 3:4. When digital,
      * 0x0 == RGB 4:4:4 color support. When analog, 0x1 == RGB color.
      */
-
     if (analog_port && (edid[20] & 0x80) ) {
 
         write_edid_byte(edid, 20, 0x00);
@@ -407,9 +406,9 @@ static void _filter_edid(unsigned char *edid, size_t edid_size, int analog_port)
     }
 }
 
-static int is_port_digital(gt_port port) {
+static int is_port_analog(gt_port port) {
 
-    return port < PORT_E;
+    return port == PORT_E;
 
 }
 
@@ -470,7 +469,7 @@ int igvt_plug_display(unsigned int domid, gt_port vgt_port,
     fprintf(fd, "%s\n", port_strings[pgt_port]);
     fclose (fd);
 
-    _filter_edid(edid, edid_size, is_port_digital(vgt_port));
+    _filter_edid(edid, edid_size, is_port_analog(vgt_port));
 
     snprintf(filename, sizeof(filename),
 	     VGT_VM_ATTRIBUTE_FORMAT, domid,
